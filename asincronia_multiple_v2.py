@@ -1,34 +1,36 @@
 import asyncio
 import concurrent.futures
-import random
 import time
 import numpy as np
 
-def sync_task(input, **kwargs):
+SLEEP_TIME = 5  # remove, just to debug
+
+def sync_long_task(*args, **kwargs):
     
-    print(f'Async task\tHilo: {kwargs["thread_id"]}\t> Tarea: {kwargs["idx"]}')
-    # Simulate a long variable computation
-    time.sleep(random.randint(a=0, b=10))
+    print(f'Async task\tThread: {kwargs["thread_id"]}\t> Task: {kwargs["idx"]}')
+
+    time.sleep(SLEEP_TIME)
 
     return
 
 
-async def async_task(input, **kwargs):
+async def async_task(*args, **kwargs):
     
     async with kwargs['semaphore']:
-        await asyncio.to_thread(sync_task, input, **kwargs)
+        asyncio.sleep(SLEEP_TIME)
+        await asyncio.to_thread(sync_long_task, args[0], **{'thread_id': kwargs['thread_id'],
+                                                            'idx': kwargs['idx']})
 
     return
 
 
-def sync_function(my_input, **kwargs):
+def sync_function(*args, **kwargs):
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        result = list()
-        tasks = [async_task(sample, **{'semaphore': kwargs['semaphore'],
+        tasks = [async_task([sample], **{'semaphore': kwargs['semaphore'],
                                        'thread_id': kwargs['thread_id'],
-                                       'idx': idx}) for idx, sample in enumerate(my_input)]
+                                       'idx': idx}) for idx, sample in enumerate(args[0])]
         
         result = loop.run_until_complete(asyncio.gather(*tasks,
                                                         return_exceptions=True))
@@ -38,18 +40,17 @@ def sync_function(my_input, **kwargs):
         raise RuntimeError(error)
 
 
-def main(iterations, **kwargs):
+def main(*args, **kwargs):
 
     MAX_THREADS = kwargs['max_threads']
     MAX_CONCURRENT_TASKS = kwargs['max_concurrent_tasks']
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
 
-    # Split iterations into 
-    batches = np.array_split(iterations, MAX_THREADS)
+    batches = np.array_split(args[0], MAX_THREADS)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS,
                                                thread_name_prefix='Thread_') as executor:
-        
+
         # Call sync_function() for each batch of our iterations
         sync_functions = [executor.submit(sync_function,
                                           batch,
@@ -64,20 +65,22 @@ def main(iterations, **kwargs):
         if not (future.cancelled() or future.exception()):
             final_results.append(future.result())
     
-    print('FINISH')
-
     return final_results
 
 
 
 if __name__ == "__main__":
     
-    # Number of total iterations
-    my_input = range(100)
+    # Total number of iterations (as a list)
+    ITERATIONS = range(100)
     # Number of threads to use
     MAX_THREADS = 10
     # Número máximo de llamadas asíncronas (llamadas al servicio)
-    MAX_CONCURRENT_TASKS = 50
+    MAX_CONCURRENT_TASKS = 100
 
-    main(my_input, **{'max_threads': MAX_THREADS,
+    start_time = time.time()
+    main(*[ITERATIONS], **{'max_threads': MAX_THREADS,
                             'max_concurrent_tasks': MAX_CONCURRENT_TASKS})
+    
+    print(f'\nEstimated execution time (monothread, sync): {SLEEP_TIME*len(ITERATIONS)} seconds')
+    print(f'\nExecution time: {round(time.time()-start_time, 3)} seconds')
