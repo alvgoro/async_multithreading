@@ -80,5 +80,5 @@ if __name__ == "__main__":
     small_df['Result'] = main(*[small_df, heavy_df], **{'max_threads': MAX_THREADS, 
                                                         'max_concurrent_tasks': MAX_CONCURRENT_TASKS})
     
-    print(f'\nEstimated execution time (monothread, sync): {SLEEP_TIME*len(heavy_df)} seconds')
+    print(f'\nEstimated execution time (monothread, sync): {SLEEP_TIME*len(small_df)} seconds')
     print(f'\nExecution time: {round(time.time()-start_time, 3)} seconds')
