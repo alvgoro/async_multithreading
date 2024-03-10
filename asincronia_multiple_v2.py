@@ -2,40 +2,36 @@ import asyncio
 import concurrent.futures
 import time
 import numpy as np
+import pandas as pd
 
 SLEEP_TIME = 5  # remove, just to debug
 
 def sync_long_task(*args, **kwargs):
     
-    print(f'Async task\tThread: {kwargs["thread_id"]}\t> Task: {kwargs["idx"]}')
-
+    # Simulate a heavy long process
     time.sleep(SLEEP_TIME)
 
-    return
+    return args[0].sum()
 
 
 async def async_task(*args, **kwargs):
     
     async with kwargs['semaphore']:
-        asyncio.sleep(SLEEP_TIME)
-        await asyncio.to_thread(sync_long_task, args[0], **{'thread_id': kwargs['thread_id'],
-                                                            'idx': kwargs['idx']})
+        result = await asyncio.to_thread(sync_long_task, args[0], args[1])
 
-    return
+    return result
 
 
 def sync_function(*args, **kwargs):
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        tasks = [async_task([sample], **{'semaphore': kwargs['semaphore'],
-                                       'thread_id': kwargs['thread_id'],
-                                       'idx': idx}) for idx, sample in enumerate(args[0])]
+        tasks = [async_task(*[row, args[1]], **{'semaphore': kwargs['semaphore']}) for _, row in args[0].iterrows()]
         
-        result = loop.run_until_complete(asyncio.gather(*tasks,
+        results = loop.run_until_complete(asyncio.gather(*tasks,
                                                         return_exceptions=True))
-
-        return result
+        # Return None if an Exception was raised
+        return [None if isinstance(result, Exception) else result for result in results]
     except Exception as error:
         raise RuntimeError(error)
 
@@ -51,11 +47,11 @@ def main(*args, **kwargs):
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS,
                                                thread_name_prefix='Thread_') as executor:
 
-        # Call sync_function() for each batch of our iterations
+        # Call sync_function() for each batch of dataframe to be analyzied
         sync_functions = [executor.submit(sync_function,
                                           batch,
-                                          **{'semaphore': semaphore,
-                                             'thread_id': idx+1}) for idx, batch in enumerate(batches)]
+                                          args[1],
+                                          **{'semaphore': semaphore}) for batch in batches]
 
         done, _ = concurrent.futures.wait(fs=sync_functions,
                                           return_when='ALL_COMPLETED')
@@ -63,24 +59,26 @@ def main(*args, **kwargs):
     final_results = list()
     for future in done:
         if not (future.cancelled() or future.exception()):
-            final_results.append(future.result())
-    
+            final_results += future.result()
+
     return final_results
 
 
 
 if __name__ == "__main__":
     
-    # Total number of iterations (as a list)
-    ITERATIONS = range(100)
     # Number of threads to use
     MAX_THREADS = 10
     # Número máximo de llamadas asíncronas (llamadas al servicio)
     MAX_CONCURRENT_TASKS = 100
 
-    start_time = time.time()
-    main(*[ITERATIONS], **{'max_threads': MAX_THREADS,
-                            'max_concurrent_tasks': MAX_CONCURRENT_TASKS})
+    NCOLS = 100
+    heavy_df = pd.DataFrame(np.random.rand(10000, NCOLS))
+    small_df = pd.DataFrame(np.random.rand(50, NCOLS))
     
-    print(f'\nEstimated execution time (monothread, sync): {SLEEP_TIME*len(ITERATIONS)} seconds')
+    start_time = time.time()
+    small_df['Result'] = main(*[small_df, heavy_df], **{'max_threads': MAX_THREADS, 
+                                                        'max_concurrent_tasks': MAX_CONCURRENT_TASKS})
+    
+    print(f'\nEstimated execution time (monothread, sync): {SLEEP_TIME*len(heavy_df)} seconds')
     print(f'\nExecution time: {round(time.time()-start_time, 3)} seconds')
