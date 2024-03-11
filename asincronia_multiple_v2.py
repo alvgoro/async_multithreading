@@ -15,11 +15,13 @@ def sync_long_task(*args, **kwargs):
 
 
 async def async_task(*args, **kwargs):
-    
-    async with kwargs['semaphore']:
-        result = await asyncio.to_thread(sync_long_task, args[0], args[1])
+    try:
+        async with kwargs['semaphore']:
+            result = await asyncio.to_thread(sync_long_task, args[0], args[1])
 
-    return result
+        return result
+    except Exception as error:
+        raise error
 
 
 def sync_function(*args, **kwargs):
@@ -29,11 +31,10 @@ def sync_function(*args, **kwargs):
         tasks = [async_task(*[row, args[1]], **{'semaphore': kwargs['semaphore']}) for _, row in args[0].iterrows()]
         
         results = loop.run_until_complete(asyncio.gather(*tasks,
-                                                        return_exceptions=True))
-        # Return None if an Exception was raised
-        return [None if isinstance(result, Exception) else result for result in results]
+                                                         return_exceptions=True))
+        return results
     except Exception as error:
-        raise RuntimeError(error)
+        raise error
 
 
 def main(*args, **kwargs):
@@ -58,8 +59,11 @@ def main(*args, **kwargs):
     
     final_results = list()
     for future in done:
-        if not (future.cancelled() or future.exception()):
-            final_results += future.result()
+        for result in future.result():
+            if isinstance(result, Exception):
+                final_results += [result]
+            else:
+                final_results += [result]
 
     return final_results
 
